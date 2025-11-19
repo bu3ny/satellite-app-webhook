@@ -1,0 +1,7 @@
+---
+# Example baseline role tasks (optional for initial test)
+
+- name: Place role-specific marker
+  ansible.builtin.file:
+    path: /root/baseline-role-ran.txt
+    state: touch

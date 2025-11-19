@@ -1,0 +1,25 @@
+---
+- name: Test baseline from Satellite webhook
+  hosts: all
+  gather_facts: yes
+  become: yes
+
+  tasks:
+
+    - name: Display host info
+      ansible.builtin.debug:
+        msg: "Running baseline on {{ inventory_hostname }} (ansible_host={{ ansible_host | default('N/A') }})"
+
+    - name: Touch marker file to prove baseline ran
+      ansible.builtin.file:
+        path: /root/aap_webhook_test_succeeded.txt
+        state: touch
+
+    - name: Ensure test package is installed
+      ansible.builtin.yum:
+        name: vim
+        state: present
+
+    - name: Print completion message
+      ansible.builtin.debug:
+        msg: "Baseline execution completed for {{ inventory_hostname }}"
