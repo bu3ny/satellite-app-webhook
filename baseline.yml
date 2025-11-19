@@ -1,36 +1,58 @@
-- name: Post-register baseline (ISO-aware)
-  hosts: all
-  gather_facts: yes
+---
+# Play 1: Build a dynamic group of ISO hosts based on Satellite parameters
+- name: Build ISO host list from Satellite parameters
+  hosts: localhost
+  gather_facts: no
+  connection: local
+
+  tasks:
+    - name: Explain what we are about to do
+      debug:
+        msg: >-
+          Scanning all inventory hosts and selecting those with
+          provision_source == "iso" into group 'iso_hosts'.
+      changed_when: false
+
+    - name: Add hosts with provision_source=iso to dynamic group 'iso_hosts'
+      add_host:
+        name: "{{ item }}"
+        groups: iso_hosts
+      loop: "{{ groups['all'] | default([]) }}"
+      when: hostvars[item].provision_source | default('') == 'iso'
+
+    - name: Show resulting iso_hosts group
+      debug:
+        var: groups['iso_hosts']
+      changed_when: false
+
+
+# Play 2: Run baseline only on the filtered ISO hosts
+- name: Post-register baseline (ISO-aware) on ISO hosts only
+  hosts: iso_hosts
+  gather_facts: yes    # Only gather facts for filtered ISO hosts
 
   tasks:
     - name: Show provision_source value as seen by inventory
       debug:
         msg: "provision_source = {{ provision_source | default('UNDEFINED') }}"
 
-    - name: Decide if this host should run ISO baseline
-      set_fact:
-        run_iso_baseline: "{{ provision_source | default('') == 'iso' }}"
-
-    - name: Inform whether baseline will run
+    - name: Inform that ISO baseline WILL run on this host
       debug:
-        msg: >-
-          ISO baseline {{ 'WILL' if run_iso_baseline else 'WILL NOT' }}
-          run on {{ inventory_hostname }}
+        msg: "ISO baseline WILL run on {{ inventory_hostname }} (provision_source=iso)"
 
-    - name: Touch marker file to prove baseline ran (ISO hosts only)
+    - name: Touch marker file to prove baseline ran
       file:
         path: /root/iso_baseline_ran
         state: touch
-      when: run_iso_baseline
 
-    - name: Ensure test package is installed (ISO hosts only)
+    - name: Ensure test package is installed
       package:
         name: tree
         state: present
-      when: run_iso_baseline
 
-    - name: Place role-specific marker (ISO hosts only)
+    - name: Place role-specific marker
       copy:
         dest: /root/baseline-role-ran.txt
-        content: "Baseline role ran on {{ inventory_hostname }} via ISO\n"
-      when: run_iso_baseline
+        content: |
+          Baseline role ran on {{ inventory_hostname }}
+          provision_source={{ provision_source }}
