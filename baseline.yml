@@ -1,46 +1,36 @@
----
 - name: Post-register baseline (ISO-aware)
   hosts: all
   gather_facts: yes
-  become: yes
 
-  pre_tasks:
-    - name: Show provision_source value received from Satellite (if any)
-      ansible.builtin.debug:
+  tasks:
+    - name: Show provision_source value as seen by inventory
+      debug:
         msg: "provision_source = {{ provision_source | default('UNDEFINED') }}"
 
     - name: Decide if this host should run ISO baseline
-      ansible.builtin.set_fact:
-        run_iso_baseline: "{{ (provision_source | default('')) == 'iso' }}"
+      set_fact:
+        run_iso_baseline: "{{ provision_source | default('') == 'iso' }}"
 
     - name: Inform whether baseline will run
-      ansible.builtin.debug:
+      debug:
         msg: >-
-          ISO baseline {{ 'WILL' if run_iso_baseline else 'WILL NOT' }} run
-          on {{ inventory_hostname }}
-
-  tasks:
+          ISO baseline {{ 'WILL' if run_iso_baseline else 'WILL NOT' }}
+          run on {{ inventory_hostname }}
 
     - name: Touch marker file to prove baseline ran (ISO hosts only)
-      ansible.builtin.file:
-        path: /root/aap_webhook_test_succeeded.txt
+      file:
+        path: /root/iso_baseline_ran
         state: touch
       when: run_iso_baseline
 
     - name: Ensure test package is installed (ISO hosts only)
-      ansible.builtin.yum:
-        name: vim
+      package:
+        name: tree
         state: present
       when: run_iso_baseline
 
     - name: Place role-specific marker (ISO hosts only)
-      ansible.builtin.file:
-        path: /root/baseline-role-ran.txt
-        state: touch
+      copy:
+        dest: /root/baseline-role-ran.txt
+        content: "Baseline role ran on {{ inventory_hostname }} via ISO\n"
       when: run_iso_baseline
-
-    - name: Final message
-      ansible.builtin.debug:
-        msg: >-
-          Finished baseline play.
-          ISO baseline run_iso_baseline={{ run_iso_baseline | default(false) }}
