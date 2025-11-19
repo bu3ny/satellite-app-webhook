@@ -1,9 +1,9 @@
 ---
-# Play 1: Build a dynamic group of ISO hosts based on Satellite parameters
+# Play 1: Build dynamic group of ISO hosts using Satellite parameters only
 - name: Build ISO host list from Satellite parameters
   hosts: localhost
-  gather_facts: no
   connection: local
+  gather_facts: no
 
   tasks:
     - name: Explain what we are about to do
@@ -19,17 +19,19 @@
         groups: iso_hosts
       loop: "{{ groups['all'] | default([]) }}"
       when: hostvars[item].provision_source | default('') == 'iso'
+      changed_when: false
 
     - name: Show resulting iso_hosts group
       debug:
-        var: groups['iso_hosts']
+        msg: "iso_hosts = {{ groups['iso_hosts'] | default([]) }}"
       changed_when: false
 
 
 # Play 2: Run baseline only on the filtered ISO hosts
 - name: Post-register baseline (ISO-aware) on ISO hosts only
   hosts: iso_hosts
-  gather_facts: yes    # Only gather facts for filtered ISO hosts
+  gather_facts: yes
+  # become: yes   # uncomment if you need privilege escalation
 
   tasks:
     - name: Show provision_source value as seen by inventory
