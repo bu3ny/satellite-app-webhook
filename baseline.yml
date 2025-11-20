@@ -66,9 +66,9 @@
         return_content: yes
       register: sat_host
 
-    - name: Extract provision_source from host parameters
+    - name: Extract installation-source from host parameters
       set_fact:
-        provision_source: >-
+        installation-source: >-
           {{
             (sat_host.json.all_parameters | default([]))
             | selectattr('name', 'eq', 'installation-source')
@@ -77,20 +77,20 @@
             | default('')
           }}
 
-    - name: Show provision_source value as seen from Satellite API
+    - name: Show installation-source value as seen from Satellite API
       debug:
         msg:
-          provision_source: "{{ provision_source | default('UNDEFINED') }}"
+          installation-source: "{{ installation-source | default('UNDEFINED') }}"
 
     - name: Skip everything if this is not an ISO host
       meta: end_play
-      when: provision_source | default('') != 'iso'
+      when: installation-source | default('') != 'iso'
 
     # ---- Actual baseline for ISO hosts ----
 
     - name: Inform that ISO baseline WILL run on this host
       debug:
-        msg: "ISO baseline WILL run on {{ inventory_hostname }} (IP={{ target_ip }}, provision_source={{ provision_source }})"
+        msg: "ISO baseline WILL run on {{ inventory_hostname }} (IP={{ target_ip }}, installation-source={{ installation-source }})"
 
     - name: Touch marker file to prove baseline ran
       file:
@@ -108,4 +108,4 @@
         content: |
           Baseline role ran on {{ inventory_hostname }}
           IP={{ target_ip }}
-          provision_source={{ provision_source | default('UNDEFINED') }}
+          installation-source={{ installation-source | default('UNDEFINED') }}
