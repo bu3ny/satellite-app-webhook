@@ -53,7 +53,7 @@
           inventory_hostname: "{{ inventory_hostname }}"
           sat_host_fqdn: "{{ sat_host_fqdn }}"
 
-    # ---- Pull host details from Satellite and read installation-source ----
+    # ---- Pull host details from Satellite and read installation_source ----
 
     - name: Query Satellite API for host details
       uri:
@@ -66,31 +66,31 @@
         return_content: yes
       register: sat_host
 
-    - name: Extract installation-source from host parameters
+    - name: Extract installation_source from host parameters
       set_fact:
-        installation-source: >-
+        installation_source: >-
           {{
             (sat_host.json.all_parameters | default([]))
-            | selectattr('name', 'eq', 'installation-source')
+            | selectattr('name', 'eq', 'installation_source')
             | map(attribute='value')
             | first
             | default('')
           }}
 
-    - name: Show installation-source value as seen from Satellite API
+    - name: Show installation_source value as seen from Satellite API
       debug:
         msg:
-          installation-source: "{{ installation-source | default('UNDEFINED') }}"
+          installation_source: "{{ installation_source | default('UNDEFINED') }}"
 
     - name: Skip everything if this is not an ISO host
       meta: end_play
-      when: installation-source | default('') != 'iso'
+      when: installation_source | default('') != 'iso'
 
     # ---- Actual baseline for ISO hosts ----
 
     - name: Inform that ISO baseline WILL run on this host
       debug:
-        msg: "ISO baseline WILL run on {{ inventory_hostname }} (IP={{ target_ip }}, installation-source={{ installation-source }})"
+        msg: "ISO baseline WILL run on {{ inventory_hostname }} (IP={{ target_ip }}, installation_source={{ installation_source }})"
 
     - name: Touch marker file to prove baseline ran
       file:
@@ -108,4 +108,4 @@
         content: |
           Baseline role ran on {{ inventory_hostname }}
           IP={{ target_ip }}
-          installation-source={{ installation-source | default('UNDEFINED') }}
+          installation_source={{ installation_source | default('UNDEFINED') }}
