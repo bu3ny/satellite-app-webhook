@@ -1,33 +1,65 @@
 ---
 - name: Post-register baseline (ISO-aware)
-  hosts: "{{ target_host | default('all') }}"
+  hosts: "{{ target_host }}"
   gather_facts: yes
 
   vars:
     satellite_url: "https://satellite.lab.example.com"
-    satellite_api_user: "admin"           # dummy username - change it to match the actual username
-    satellite_api_password: "redhat"   # dummy password - change it to match the actual one or better use a token
+    satellite_api_user: "admin"       # dummy username - replace with your username OR use a credential
+    satellite_api_password: "redhat"  # dummy password - replace with vault/credential
 
   tasks:
     - name: Show basic context as we see it from AAP
       debug:
         msg:
-          target_host: "{{ target_host | default('UNDEFINED') }}"
+          target_host: "{{ target_host }}"
           inventory_hostname: "{{ inventory_hostname }}"
 
-    - name: Query Satellite API for host details
+    ###########################################################################
+    # 1) Convert IP → FQDN using Satellite API
+    ###########################################################################
+    - name: Query Satellite API to find host FQDN by IP
       uri:
-        url: "{{ satellite_url }}/api/v2/hosts/{{ inventory_hostname }}"
+        url: "{{ satellite_url }}/api/v2/hosts?search=ip={{ target_host }}"
         method: GET
         user: "{{ satellite_api_user }}"
         password: "{{ satellite_api_password }}"
         force_basic_auth: yes
-        validate_certs: no          # flip to yes if you’ve got proper CA trust
+        validate_certs: no
+        return_content: yes
+      register: lookup_by_ip
+
+    - name: Validate that the host exists in Satellite for this IP
+      fail:
+        msg: "No host found in Satellite for IP {{ target_host }}"
+      when: lookup_by_ip.json.total == 0
+
+    - name: Set FQDN fact
+      set_fact:
+        sat_host_fqdn: "{{ lookup_by_ip.json.results[0].name }}"
+
+    - name: Show the resolved FQDN
+      debug:
+        msg: "Satellite FQDN resolved from IP {{ target_host }} -> {{ sat_host_fqdn }}"
+
+    ###########################################################################
+    # 2) Pull full host details using the FQDN
+    ###########################################################################
+    - name: Query Satellite API for full host details
+      uri:
+        url: "{{ satellite_url }}/api/v2/hosts/{{ sat_host_fqdn }}"
+        method: GET
+        user: "{{ satellite_api_user }}"
+        password: "{{ satellite_api_password }}"
+        force_basic_auth: yes
+        validate_certs: no
         return_content: yes
       register: sat_host
-      run_once: false               # we want this per host
 
-    - name: Extract provision_source from host parameters
+    ###########################################################################
+    # 3) Extract provision_source from Satellite all_parameters
+    ###########################################################################
+    - name: Extract provision_source from Satellite API
       set_fact:
         provision_source: >-
           {{
@@ -38,16 +70,22 @@
             | default('')
           }}
 
-    - name: Show provision_source value as seen from Satellite API
+    - name: Show provision_source value
       debug:
         msg:
-          provision_source: "{{ provision_source | default('UNDEFINED') }}"
+          provision_source: "{{ provision_source }}"
 
-    - name: Skip everything if this is not an ISO host
+    ###########################################################################
+    # 4) ISO Filter
+    ###########################################################################
+    - name: Stop play if not an ISO host
       meta: end_play
-      when: provision_source | default('') != 'iso'
+      when: provision_source != "iso"
 
-    - name: Inform that ISO baseline WILL run on this host
+    ###########################################################################
+    # 5) ISO Baseline Tasks
+    ###########################################################################
+    - name: Inform that ISO baseline WILL run
       debug:
         msg: "ISO baseline WILL run on {{ inventory_hostname }} (provision_source={{ provision_source }})"
 
@@ -66,4 +104,4 @@
         dest: /root/baseline-role-ran.txt
         content: |
           Baseline role ran on {{ inventory_hostname }}
-          provision_source={{ provision_source | default('UNDEFINED') }}
+          provision_source={{ provision_source }}
