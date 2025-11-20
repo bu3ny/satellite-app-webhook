@@ -1,12 +1,47 @@
 ---
 - name: Post-register baseline (ISO-aware)
-  hosts: all
+  hosts: "{{ target_host | default('all') }}"
   gather_facts: yes
 
+  vars:
+    satellite_url: "https://satellite.lab.example.com"
+    satellite_api_user: "admin"           # dummy username - change it to match the actual username
+    satellite_api_password: "redhat"   # dummy password - change it to match the actual one or better use a token
+
   tasks:
-    - name: Show provision_source value
+    - name: Show basic context as we see it from AAP
       debug:
-        msg: "provision_source = {{ provision_source | default('UNDEFINED') }}"
+        msg:
+          target_host: "{{ target_host | default('UNDEFINED') }}"
+          inventory_hostname: "{{ inventory_hostname }}"
+
+    - name: Query Satellite API for host details
+      uri:
+        url: "{{ satellite_url }}/api/v2/hosts/{{ inventory_hostname }}"
+        method: GET
+        user: "{{ satellite_api_user }}"
+        password: "{{ satellite_api_password }}"
+        force_basic_auth: yes
+        validate_certs: no          # flip to yes if you’ve got proper CA trust
+        return_content: yes
+      register: sat_host
+      run_once: false               # we want this per host
+
+    - name: Extract provision_source from host parameters
+      set_fact:
+        provision_source: >-
+          {{
+            (sat_host.json.all_parameters | default([]))
+            | selectattr('name', 'eq', 'provision_source')
+            | map(attribute='value')
+            | first
+            | default('')
+          }}
+
+    - name: Show provision_source value as seen from Satellite API
+      debug:
+        msg:
+          provision_source: "{{ provision_source | default('UNDEFINED') }}"
 
     - name: Skip everything if this is not an ISO host
       meta: end_play
@@ -25,3 +60,10 @@
       package:
         name: tree
         state: present
+
+    - name: Place role-specific marker
+      copy:
+        dest: /root/baseline-role-ran.txt
+        content: |
+          Baseline role ran on {{ inventory_hostname }}
+          provision_source={{ provision_source | default('UNDEFINED') }}
