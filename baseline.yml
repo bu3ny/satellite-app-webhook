@@ -5,98 +5,56 @@
 
   vars:
     satellite_url: "https://satellite.lab.example.com"
-    satellite_api_user: "admin"         # adjust
-    satellite_api_password: "redhat"    # adjust / use credential
+    satellite_api_user: "admin"        # change to real user or use a token
+    satellite_api_password: "redhat"   # change / vault / env var
 
   tasks:
+
     - name: Show basic context as we see it from AAP
       debug:
         msg:
           inventory_hostname: "{{ inventory_hostname }}"
-          ansible_ip: "{{ ansible_default_ipv4.address | default('NO_IP_FACT') }}"
           target_name: "{{ target_name | default('UNDEFINED') }}"
-          target_ip_raw: "{{ target_ip | default('UNDEFINED', true) }}"
+          target_ip: "{{ target_ip | default('UNDEFINED') }}"
+          ansible_ip: "{{ ansible_default_ipv4.address | default('UNKNOWN') }}"
 
-    # 1) Normalize target_ip (could be null, undefined, empty, etc.)
-    - name: Normalize target_ip from webhook
-      set_fact:
-        normalized_target_ip: "{{ target_ip | default('', true) | string | trim }}"
-
-    - name: Show normalized_target_ip
-      debug:
-        msg:
-          normalized_target_ip: "{{ normalized_target_ip }}"
-
-    # 2) If webhook provided a non-empty IP, use it
-    - name: Use webhook IP when provided
-      set_fact:
-        effective_ip: "{{ normalized_target_ip }}"
-      when: normalized_target_ip | length > 0
-
-    # 3) Otherwise fall back to the fact IP
-    - name: Fall back to ansible_default_ipv4.address when webhook IP is empty
-      set_fact:
-        effective_ip: "{{ ansible_default_ipv4.address | default('') }}"
-      when: normalized_target_ip | length == 0
-
-    - name: Show effective IP
-      debug:
-        msg:
-          effective_ip: "{{ effective_ip | default('') }}"
-
-    - name: Fail if we still don't have any IP to work with
+    - name: Ensure target_ip is provided by webhook
       fail:
-        msg: >-
-          No usable IP: target_ip is empty/null and ansible_default_ipv4.address
-          is also missing. Something is very wrong with this host's networking/facts.
-      when: effective_ip | default('') | length == 0
+        msg: "target_ip from webhook is missing or empty; refusing to run."
+      when: (target_ip | default('', true) | string | trim) | length == 0
 
-    # Optional sanity check:
-    # Only complain if webhook actually had an IP AND it does not match fact IP.
-    - name: Sanity check that this host IP matches the target_ip from the webhook
-      fail:
-        msg: >-
-          This host ({{ inventory_hostname }}) has IP {{ ansible_default_ipv4.address | default('NO_IP_FACT') }},
-          but the webhook says target_ip={{ normalized_target_ip }}.
-          Aborting to avoid touching the wrong host.
-      when:
-        - normalized_target_ip | length > 0
-        - ansible_default_ipv4.address | default('') != normalized_target_ip
+    # ---- Look up the host in Satellite by IP ----
 
-    # -----------------------------
-    # Talk to Satellite by IP
-    # -----------------------------
     - name: Lookup Satellite host by IP
       uri:
-        url: "{{ satellite_url }}/api/v2/hosts?search=ip={{ effective_ip }}"
+        url: "{{ satellite_url }}/api/v2/hosts?search=ip={{ target_ip | urlencode }}"
         method: GET
         user: "{{ satellite_api_user }}"
         password: "{{ satellite_api_password }}"
         force_basic_auth: yes
-        validate_certs: no          # set to yes if your CA is trusted
+        validate_certs: no       # flip to yes when CA trust is proper
         return_content: yes
       register: lookup_by_ip
-
-    - name: Extract Satellite FQDN from lookup
-      set_fact:
-        sat_host_fqdn: "{{ (lookup_by_ip.json.results | default([]))[0].name | default('') }}"
 
     - name: Fail clearly if Satellite could not find the host by IP
       fail:
         msg: >-
-          Satellite API did not return any host for IP={{ effective_ip }}.
-          Raw results: {{ lookup_by_ip.json.results | default([]) }}
-      when: lookup_by_ip.json.results | default([]) | length == 0
+          Satellite did not return any hosts for ip={{ target_ip }}.
+          Raw response: {{ lookup_by_ip.json }}
+      when: (lookup_by_ip.json.results | default([]) | length) == 0
+
+    - name: Set Satellite host FQDN
+      set_fact:
+        sat_host_fqdn: "{{ lookup_by_ip.json.results[0].name }}"
 
     - name: Show Satellite host FQDN we will use
       debug:
         msg:
-          sat_host_fqdn: "{{ sat_host_fqdn }}"
           inventory_hostname: "{{ inventory_hostname }}"
+          sat_host_fqdn: "{{ sat_host_fqdn }}"
 
-    # -----------------------------
-    # Get parameters from Satellite
-    # -----------------------------
+    # ---- Pull host details from Satellite and read provision_source ----
+
     - name: Query Satellite API for host details
       uri:
         url: "{{ satellite_url }}/api/v2/hosts/{{ sat_host_fqdn }}"
@@ -128,14 +86,11 @@
       meta: end_play
       when: provision_source | default('') != 'iso'
 
-    # -----------------------------
-    # Actual baseline work
-    # -----------------------------
+    # ---- Actual baseline for ISO hosts ----
+
     - name: Inform that ISO baseline WILL run on this host
       debug:
-        msg: >-
-          ISO baseline WILL run on {{ inventory_hostname }}
-          (IP={{ effective_ip }}, provision_source={{ provision_source }})
+        msg: "ISO baseline WILL run on {{ inventory_hostname }} (IP={{ target_ip }}, provision_source={{ provision_source }})"
 
     - name: Touch marker file to prove baseline ran
       file:
@@ -152,5 +107,5 @@
         dest: /root/baseline-role-ran.txt
         content: |
           Baseline role ran on {{ inventory_hostname }}
-          IP={{ effective_ip }}
+          IP={{ target_ip }}
           provision_source={{ provision_source | default('UNDEFINED') }}
