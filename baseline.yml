@@ -1,46 +1,20 @@
 ---
-# Play 1: Build dynamic group of ISO hosts using Satellite parameters only
-- name: Build ISO host list from Satellite parameters
-  hosts: localhost
-  connection: local
-  gather_facts: no
-
-  tasks:
-    - name: Explain what we are about to do
-      debug:
-        msg: >-
-          Scanning all inventory hosts and selecting those with
-          provision_source == "iso" into group 'iso_hosts'.
-      changed_when: false
-
-    - name: Add hosts with provision_source=iso to dynamic group 'iso_hosts'
-      add_host:
-        name: "{{ item }}"
-        groups: iso_hosts
-      loop: "{{ groups['all'] | default([]) }}"
-      when: hostvars[item].provision_source | default('') == 'iso'
-      changed_when: false
-
-    - name: Show resulting iso_hosts group
-      debug:
-        msg: "iso_hosts = {{ groups['iso_hosts'] | default([]) }}"
-      changed_when: false
-
-
-# Play 2: Run baseline only on the filtered ISO hosts
-- name: Post-register baseline (ISO-aware) on ISO hosts only
-  hosts: iso_hosts
+- name: Post-register baseline (ISO-aware)
+  hosts: all
   gather_facts: yes
-  # become: yes   # uncomment if you need privilege escalation
 
   tasks:
-    - name: Show provision_source value as seen by inventory
+    - name: Show provision_source value
       debug:
         msg: "provision_source = {{ provision_source | default('UNDEFINED') }}"
 
+    - name: Skip everything if this is not an ISO host
+      meta: end_play
+      when: provision_source | default('') != 'iso'
+
     - name: Inform that ISO baseline WILL run on this host
       debug:
-        msg: "ISO baseline WILL run on {{ inventory_hostname }} (provision_source=iso)"
+        msg: "ISO baseline WILL run on {{ inventory_hostname }} (provision_source={{ provision_source }})"
 
     - name: Touch marker file to prove baseline ran
       file:
@@ -51,10 +25,3 @@
       package:
         name: tree
         state: present
-
-    - name: Place role-specific marker
-      copy:
-        dest: /root/baseline-role-ran.txt
-        content: |
-          Baseline role ran on {{ inventory_hostname }}
-          provision_source={{ provision_source }}
