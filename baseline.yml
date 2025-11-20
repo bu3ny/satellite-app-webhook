@@ -1,31 +1,32 @@
 ---
 - name: Post-register baseline (ISO-aware, IP-based)
-  hosts: all              # IMPORTANT: do NOT limit here; we filter by IP inside
+  hosts: all
   gather_facts: yes
 
+  # These are the Satellite API credentials the playbook will use
+  # You can later move them to a credential / vars file.
   vars:
     satellite_url: "https://satellite.lab.example.com"
-    satellite_api_user: "admin"        # dummy username - change to real user
-    satellite_api_password: "redhat"   # dummy password - change to real password or use a token
+    satellite_api_user: "admin"      # dummy username - change in production
+    satellite_api_password: "redhat" # dummy password - change in production
 
   tasks:
     - name: Show basic context as we see it from AAP
       debug:
         msg:
-          inventory_hostname: "{{ inventory_hostname }}"
-          ansible_ip: "{{ ansible_default_ipv4.address | default('UNKNOWN') }}"
           target_ip: "{{ target_ip | default('UNDEFINED') }}"
           target_name: "{{ target_name | default('UNDEFINED') }}"
+          inventory_hostname: "{{ inventory_hostname }}"
+          ansible_ip: "{{ ansible_default_ipv4.address | default('NO_IP_FACT') }}"
 
-    # 1) Only the host whose IP == target_ip will continue;
-    #    all others end their execution here.
+    # ⚠ Hard filter: only the host whose IP matches target_ip continues.
+    # All other inventory hosts (Satellite, Capsules, others) stop here.
     - name: Stop on all hosts except the one that just registered
       meta: end_host
       when: ansible_default_ipv4.address | default('') != target_ip | default('')
 
-    # From this point on, ONLY the matching host runs the tasks below.
+    # From this point on, only the new client continues.
 
-    # 2) Look up the Satellite host by IP (authoritative mapping)
     - name: Lookup Satellite host by IP
       uri:
         url: "{{ satellite_url }}/api/v2/hosts?search=ip={{ target_ip }}"
@@ -33,7 +34,7 @@
         user: "{{ satellite_api_user }}"
         password: "{{ satellite_api_password }}"
         force_basic_auth: yes
-        validate_certs: no          # set to yes if CA trust is configured
+        validate_certs: no          # set to yes if your CA is trusted
         return_content: yes
       register: lookup_by_ip
 
@@ -41,21 +42,22 @@
       set_fact:
         sat_host_fqdn: >-
           {{
-            lookup_by_ip.json.results[0].name
+            (lookup_by_ip.json.results | default([]) | first).name
             | default('')
           }}
 
     - name: Fail clearly if Satellite could not find the host by IP
       fail:
-        msg: "Could not find Satellite host for IP {{ target_ip }} in /api/v2/hosts"
-      when: sat_host_fqdn == ''
+        msg: >-
+          Satellite API did not return a host for IP {{ target_ip }}.
+          Raw response: {{ lookup_by_ip.json | default('NO JSON') }}
+      when: sat_host_fqdn | length == 0
 
     - name: Show Satellite host FQDN we will use
       debug:
         msg:
           sat_host_fqdn: "{{ sat_host_fqdn }}"
 
-    # 3) Query host details from Satellite using the FQDN from the lookup
     - name: Query Satellite API for host details
       uri:
         url: "{{ satellite_url }}/api/v2/hosts/{{ sat_host_fqdn }}"
@@ -67,7 +69,6 @@
         return_content: yes
       register: sat_host
 
-    # 4) Pull provision_source from host parameters
     - name: Extract provision_source from host parameters
       set_fact:
         provision_source: >-
@@ -84,15 +85,18 @@
         msg:
           provision_source: "{{ provision_source | default('UNDEFINED') }}"
 
-    # 5) Skip baseline if not an ISO host
+    # If this is NOT an ISO host, end the play (for this host).
     - name: Skip everything if this is not an ISO host
-      meta: end_host
+      meta: end_play
       when: provision_source | default('') != 'iso'
 
-    # 6) Baseline actions actually executed only on ISO hosts
+    # From here down, only ISO hosts will run.
+
     - name: Inform that ISO baseline WILL run on this host
       debug:
-        msg: "ISO baseline WILL run on {{ inventory_hostname }} (IP={{ ansible_default_ipv4.address }}, provision_source={{ provision_source }})"
+        msg: >-
+          ISO baseline WILL run on {{ inventory_hostname }}
+          (IP={{ target_ip }}, provision_source={{ provision_source }})
 
     - name: Touch marker file to prove baseline ran
       file:
@@ -109,6 +113,5 @@
         dest: /root/baseline-role-ran.txt
         content: |
           Baseline role ran on {{ inventory_hostname }}
-          IP={{ ansible_default_ipv4.address | default('UNKNOWN') }}
-          Satellite host={{ sat_host_fqdn }}
+          IP={{ target_ip | default('UNKNOWN') }}
           provision_source={{ provision_source | default('UNDEFINED') }}
