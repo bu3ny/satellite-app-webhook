@@ -53,7 +53,7 @@
           inventory_hostname: "{{ inventory_hostname }}"
           sat_host_fqdn: "{{ sat_host_fqdn }}"
 
-    # ---- Pull host details from Satellite and read provision_source ----
+    # ---- Pull host details from Satellite and read installation-source ----
 
     - name: Query Satellite API for host details
       uri:
