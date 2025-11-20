@@ -17,13 +17,18 @@
           target_name: "{{ target_name | default('UNDEFINED') }}"
           target_ip_raw: "{{ target_ip | default('UNDEFINED') }}"
 
-    # Decide which IP we will actually use
+    # Decide which IP we will actually use:
+    # - If target_ip is provided and non-empty → use it
+    # - Else → fall back to ansible_default_ipv4.address
     - name: Decide effective IP to use
       set_fact:
         effective_ip: >-
           {{
-            (target_ip is defined and (target_ip | string | length) > 0)
-            | ternary(target_ip, ansible_default_ipv4.address | default(''))
+            (target_ip | default('', true) | string | trim) | length > 0
+            | ternary(
+                target_ip | default('', true) | string | trim,
+                ansible_default_ipv4.address | default('')
+              )
           }}
 
     - name: Show effective IP
@@ -33,19 +38,21 @@
 
     - name: Fail if we still don't have any IP to work with
       fail:
-        msg: "No usable IP: target_ip is empty and ansible_default_ipv4.address is missing."
+        msg: >-
+          No usable IP: target_ip is empty/null and ansible_default_ipv4.address
+          is also missing. Something is very wrong with this host's networking/facts.
       when: effective_ip | string | length == 0
 
-    # Only do sanity check if target_ip was actually provided and non-empty
+    # Optional sanity check: only if target_ip was actually provided
     - name: Sanity check that this host IP matches the target_ip from the webhook
       fail:
         msg: >-
           This host ({{ inventory_hostname }}) has IP {{ ansible_default_ipv4.address | default('NO_IP_FACT') }},
-          but the webhook says target_ip={{ target_ip }}. Aborting to avoid touching the wrong host.
+          but the webhook says target_ip={{ target_ip | default('EMPTY', true) }}.
+          Aborting to avoid touching the wrong host.
       when:
-        - target_ip is defined
-        - (target_ip | string | length) > 0
-        - ansible_default_ipv4.address | default('') != target_ip | string
+        - (target_ip | default('', true) | string | trim) | length > 0
+        - ansible_default_ipv4.address | default('') != target_ip | default('', true) | string | trim
 
     # -----------------------------
     # Talk to Satellite by IP
@@ -57,7 +64,7 @@
         user: "{{ satellite_api_user }}"
         password: "{{ satellite_api_password }}"
         force_basic_auth: yes
-        validate_certs: no          # set to yes if CA is trusted
+        validate_certs: no          # set to yes if your CA is trusted
         return_content: yes
       register: lookup_by_ip
 
