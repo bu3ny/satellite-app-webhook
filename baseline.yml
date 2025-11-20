@@ -15,44 +15,53 @@
           inventory_hostname: "{{ inventory_hostname }}"
           ansible_ip: "{{ ansible_default_ipv4.address | default('NO_IP_FACT') }}"
           target_name: "{{ target_name | default('UNDEFINED') }}"
-          target_ip_raw: "{{ target_ip | default('UNDEFINED') }}"
+          target_ip_raw: "{{ target_ip | default('UNDEFINED', true) }}"
 
-    # Decide which IP we will actually use:
-    # - If target_ip is provided and non-empty → use it
-    # - Else → fall back to ansible_default_ipv4.address
-    - name: Decide effective IP to use
+    # 1) Normalize target_ip (could be null, undefined, empty, etc.)
+    - name: Normalize target_ip from webhook
       set_fact:
-        effective_ip: >-
-          {{
-            (target_ip | default('', true) | string | trim) | length > 0
-            | ternary(
-                target_ip | default('', true) | string | trim,
-                ansible_default_ipv4.address | default('')
-              )
-          }}
+        normalized_target_ip: "{{ target_ip | default('', true) | string | trim }}"
+
+    - name: Show normalized_target_ip
+      debug:
+        msg:
+          normalized_target_ip: "{{ normalized_target_ip }}"
+
+    # 2) If webhook provided a non-empty IP, use it
+    - name: Use webhook IP when provided
+      set_fact:
+        effective_ip: "{{ normalized_target_ip }}"
+      when: normalized_target_ip | length > 0
+
+    # 3) Otherwise fall back to the fact IP
+    - name: Fall back to ansible_default_ipv4.address when webhook IP is empty
+      set_fact:
+        effective_ip: "{{ ansible_default_ipv4.address | default('') }}"
+      when: normalized_target_ip | length == 0
 
     - name: Show effective IP
       debug:
         msg:
-          effective_ip: "{{ effective_ip }}"
+          effective_ip: "{{ effective_ip | default('') }}"
 
     - name: Fail if we still don't have any IP to work with
       fail:
         msg: >-
           No usable IP: target_ip is empty/null and ansible_default_ipv4.address
           is also missing. Something is very wrong with this host's networking/facts.
-      when: effective_ip | string | length == 0
+      when: effective_ip | default('') | length == 0
 
-    # Optional sanity check: only if target_ip was actually provided
+    # Optional sanity check:
+    # Only complain if webhook actually had an IP AND it does not match fact IP.
     - name: Sanity check that this host IP matches the target_ip from the webhook
       fail:
         msg: >-
           This host ({{ inventory_hostname }}) has IP {{ ansible_default_ipv4.address | default('NO_IP_FACT') }},
-          but the webhook says target_ip={{ target_ip | default('EMPTY', true) }}.
+          but the webhook says target_ip={{ normalized_target_ip }}.
           Aborting to avoid touching the wrong host.
       when:
-        - (target_ip | default('', true) | string | trim) | length > 0
-        - ansible_default_ipv4.address | default('') != target_ip | default('', true) | string | trim
+        - normalized_target_ip | length > 0
+        - ansible_default_ipv4.address | default('') != normalized_target_ip
 
     # -----------------------------
     # Talk to Satellite by IP
