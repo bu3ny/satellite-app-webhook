@@ -71,7 +71,7 @@
         provision_source: >-
           {{
             (sat_host.json.all_parameters | default([]))
-            | selectattr('name', 'eq', 'provision_source')
+            | selectattr('name', 'eq', 'installation-source')
             | map(attribute='value')
             | first
             | default('')
