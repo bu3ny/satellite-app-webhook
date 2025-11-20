@@ -6,43 +6,60 @@
   vars:
     satellite_url: "https://satellite.lab.example.com"
     satellite_api_user: "admin"         # adjust
-    satellite_api_password: "redhat"    # adjust or use a token/credential
+    satellite_api_password: "redhat"    # adjust / use credential
 
   tasks:
     - name: Show basic context as we see it from AAP
       debug:
         msg:
-          target_ip: "{{ target_ip | default('UNDEFINED') }}"
-          target_name: "{{ target_name | default('UNDEFINED') }}"
           inventory_hostname: "{{ inventory_hostname }}"
           ansible_ip: "{{ ansible_default_ipv4.address | default('NO_IP_FACT') }}"
+          target_name: "{{ target_name | default('UNDEFINED') }}"
+          target_ip_raw: "{{ target_ip | default('UNDEFINED') }}"
 
-    - name: Fail early if target_ip is not defined
+    # Decide which IP we will actually use
+    - name: Decide effective IP to use
+      set_fact:
+        effective_ip: >-
+          {{
+            (target_ip is defined and (target_ip | string | length) > 0)
+            | ternary(target_ip, ansible_default_ipv4.address | default(''))
+          }}
+
+    - name: Show effective IP
+      debug:
+        msg:
+          effective_ip: "{{ effective_ip }}"
+
+    - name: Fail if we still don't have any IP to work with
       fail:
-        msg: "target_ip extra_var is required but not set — check the Satellite webhook template."
-      when: target_ip is not defined or target_ip | string | length == 0
+        msg: "No usable IP: target_ip is empty and ansible_default_ipv4.address is missing."
+      when: effective_ip | string | length == 0
 
+    # Only do sanity check if target_ip was actually provided and non-empty
     - name: Sanity check that this host IP matches the target_ip from the webhook
       fail:
         msg: >-
           This host ({{ inventory_hostname }}) has IP {{ ansible_default_ipv4.address | default('NO_IP_FACT') }},
           but the webhook says target_ip={{ target_ip }}. Aborting to avoid touching the wrong host.
-      when: ansible_default_ipv4.address | default('') != target_ip | string
+      when:
+        - target_ip is defined
+        - (target_ip | string | length) > 0
+        - ansible_default_ipv4.address | default('') != target_ip | string
 
     # -----------------------------
     # Talk to Satellite by IP
     # -----------------------------
     - name: Lookup Satellite host by IP
       uri:
-        url: "{{ satellite_url }}/api/v2/hosts?search=ip={{ target_ip }}"
+        url: "{{ satellite_url }}/api/v2/hosts?search=ip={{ effective_ip }}"
         method: GET
         user: "{{ satellite_api_user }}"
         password: "{{ satellite_api_password }}"
         force_basic_auth: yes
-        validate_certs: no          # set to yes if you have proper CA trust
+        validate_certs: no          # set to yes if CA is trusted
         return_content: yes
       register: lookup_by_ip
-      run_once: false               # 1 host anyway, but explicit
 
     - name: Extract Satellite FQDN from lookup
       set_fact:
@@ -51,7 +68,7 @@
     - name: Fail clearly if Satellite could not find the host by IP
       fail:
         msg: >-
-          Satellite API did not return any host for IP={{ target_ip }}.
+          Satellite API did not return any host for IP={{ effective_ip }}.
           Raw results: {{ lookup_by_ip.json.results | default([]) }}
       when: lookup_by_ip.json.results | default([]) | length == 0
 
@@ -102,7 +119,7 @@
       debug:
         msg: >-
           ISO baseline WILL run on {{ inventory_hostname }}
-          (IP={{ target_ip }}, provision_source={{ provision_source }})
+          (IP={{ effective_ip }}, provision_source={{ provision_source }})
 
     - name: Touch marker file to prove baseline ran
       file:
@@ -119,5 +136,5 @@
         dest: /root/baseline-role-ran.txt
         content: |
           Baseline role ran on {{ inventory_hostname }}
-          IP={{ target_ip }}
+          IP={{ effective_ip }}
           provision_source={{ provision_source | default('UNDEFINED') }}
