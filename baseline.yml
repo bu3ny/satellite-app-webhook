@@ -5,8 +5,9 @@
 
   vars:
     satellite_url: "https://satellite.lab.example.com"
-    satellite_api_user: "admin"        # change to real user or use a token
-    satellite_api_password: "redhat"   # change / vault / env var
+    # NOTE:
+    #   satellite_api_token is injected by the AAP "Satellite API Token"
+    #   credential type you created. Do NOT hardcode it here.
 
   tasks:
 
@@ -29,10 +30,9 @@
       uri:
         url: "{{ satellite_url }}/api/v2/hosts?search=ip={{ target_ip | urlencode }}"
         method: GET
-        user: "{{ satellite_api_user }}"
-        password: "{{ satellite_api_password }}"
-        force_basic_auth: yes
-        validate_certs: no       # flip to yes when CA trust is proper
+        headers:
+          Authorization: "Bearer {{ satellite_api_token }}"
+        validate_certs: no          # set to 'yes' when CA trust is configured
         return_content: yes
       register: lookup_by_ip
 
@@ -53,44 +53,43 @@
           inventory_hostname: "{{ inventory_hostname }}"
           sat_host_fqdn: "{{ sat_host_fqdn }}"
 
-    # ---- Pull host details from Satellite and read provision_source ----
+    # ---- Pull host details from Satellite and read installation_source ----
 
     - name: Query Satellite API for host details
       uri:
         url: "{{ satellite_url }}/api/v2/hosts/{{ sat_host_fqdn }}"
         method: GET
-        user: "{{ satellite_api_user }}"
-        password: "{{ satellite_api_password }}"
-        force_basic_auth: yes
+        headers:
+          Authorization: "Bearer {{ satellite_api_token }}"
         validate_certs: no
         return_content: yes
       register: sat_host
 
-    - name: Extract provision_source from host parameters
+    - name: Extract installation_source from host parameters
       set_fact:
-        provision_source: >-
+        installation_source: >-
           {{
             (sat_host.json.all_parameters | default([]))
-            | selectattr('name', 'eq', 'provision_source')
+            | selectattr('name', 'eq', 'installation_source')
             | map(attribute='value')
             | first
             | default('')
           }}
 
-    - name: Show provision_source value as seen from Satellite API
+    - name: Show installation_source value as seen from Satellite API
       debug:
         msg:
-          provision_source: "{{ provision_source | default('UNDEFINED') }}"
+          installation_source: "{{ installation_source | default('UNDEFINED') }}"
 
     - name: Skip everything if this is not an ISO host
       meta: end_play
-      when: provision_source | default('') != 'iso'
+      when: installation_source | default('') != 'iso'
 
     # ---- Actual baseline for ISO hosts ----
 
     - name: Inform that ISO baseline WILL run on this host
       debug:
-        msg: "ISO baseline WILL run on {{ inventory_hostname }} (IP={{ target_ip }}, provision_source={{ provision_source }})"
+        msg: "ISO baseline WILL run on {{ inventory_hostname }} (IP={{ target_ip }}, installation_source={{ installation_source }})"
 
     - name: Touch marker file to prove baseline ran
       file:
@@ -108,4 +107,4 @@
         content: |
           Baseline role ran on {{ inventory_hostname }}
           IP={{ target_ip }}
-          provision_source={{ provision_source | default('UNDEFINED') }}
+          installation_source={{ installation_source | default('UNDEFINED') }}
