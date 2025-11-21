@@ -5,9 +5,6 @@
 
   vars:
     satellite_url: "https://satellite.lab.example.com"
-    # NOTE:
-    #   satellite_api_token is injected by the AAP "Satellite API Token"
-    #   credential type you created. Do NOT hardcode it here.
 
   tasks:
 
@@ -30,9 +27,10 @@
       uri:
         url: "{{ satellite_url }}/api/v2/hosts?search=ip={{ target_ip | urlencode }}"
         method: GET
-        headers:
-          Authorization: "Bearer {{ satellite_api_token }}"
-        validate_certs: no          # set to 'yes' when CA trust is configured
+        user: "{{ satellite_api_user }}"
+        password: "{{ satellite_api_password }}"
+        force_basic_auth: yes
+        validate_certs: no      # flip to yes when CA trust is configured
         return_content: yes
       register: lookup_by_ip
 
@@ -59,8 +57,9 @@
       uri:
         url: "{{ satellite_url }}/api/v2/hosts/{{ sat_host_fqdn }}"
         method: GET
-        headers:
-          Authorization: "Bearer {{ satellite_api_token }}"
+        user: "{{ satellite_api_user }}"
+        password: "{{ satellite_api_password }}"
+        force_basic_auth: yes
         validate_certs: no
         return_content: yes
       register: sat_host
