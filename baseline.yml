@@ -3,9 +3,6 @@
   hosts: "{{ target_name | default('all') }}"
   gather_facts: yes
 
-  vars:
-    satellite_url: "https://satellite.lab.example.com"
-
   tasks:
 
     - name: Show basic context as we see it from AAP
@@ -15,11 +12,14 @@
           target_name: "{{ target_name | default('UNDEFINED') }}"
           target_ip: "{{ target_ip | default('UNDEFINED') }}"
           ansible_ip: "{{ ansible_default_ipv4.address | default('UNKNOWN') }}"
+          satellite_url: "{{ satellite_url }}"
+          satellite_api_user: "{{ satellite_api_user }}"
 
     - name: Ensure target_ip is provided by webhook
       fail:
         msg: "target_ip from webhook is missing or empty; refusing to run."
       when: (target_ip | default('', true) | string | trim) | length == 0
+
 
     # ---- Look up the host in Satellite by IP ----
 
@@ -30,7 +30,7 @@
         user: "{{ satellite_api_user }}"
         password: "{{ satellite_api_password }}"
         force_basic_auth: yes
-        validate_certs: no      # flip to yes when CA trust is configured
+        validate_certs: no
         return_content: yes
       register: lookup_by_ip
 
@@ -45,13 +45,13 @@
       set_fact:
         sat_host_fqdn: "{{ lookup_by_ip.json.results[0].name }}"
 
-    - name: Show Satellite host FQDN we will use
+    - name: Show Satellite host FQDN
       debug:
         msg:
-          inventory_hostname: "{{ inventory_hostname }}"
           sat_host_fqdn: "{{ sat_host_fqdn }}"
 
-    # ---- Pull host details from Satellite and read installation_source ----
+
+    # ---- Query Satellite for details ----
 
     - name: Query Satellite API for host details
       uri:
@@ -75,35 +75,35 @@
             | default('')
           }}
 
-    - name: Show installation_source value as seen from Satellite API
+    - name: Show installation_source value
       debug:
         msg:
-          installation_source: "{{ installation_source | default('UNDEFINED') }}"
+          installation_source: "{{ installation_source }}"
 
-    - name: Skip everything if this is not an ISO host
+
+    # ---- Conditional execution ----
+
+    - name: Skip if not ISO
       meta: end_play
-      when: installation_source | default('') != 'iso'
+      when: installation_source != "iso"
 
-    # ---- Actual baseline for ISO hosts ----
 
-    - name: Inform that ISO baseline WILL run on this host
-      debug:
-        msg: "ISO baseline WILL run on {{ inventory_hostname }} (IP={{ target_ip }}, installation_source={{ installation_source }})"
+    # ---- Run ISO baseline ----
 
-    - name: Touch marker file to prove baseline ran
+    - name: Touch marker file
       file:
         path: /root/iso_baseline_ran
         state: touch
 
-    - name: Ensure test package is installed
+    - name: Ensure tree installed
       package:
         name: tree
         state: present
 
-    - name: Place role-specific marker
+    - name: Create role marker
       copy:
         dest: /root/baseline-role-ran.txt
         content: |
           Baseline role ran on {{ inventory_hostname }}
           IP={{ target_ip }}
-          installation_source={{ installation_source | default('UNDEFINED') }}
+          installation_source={{ installation_source }}
